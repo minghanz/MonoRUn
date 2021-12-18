@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.modules.utils import _pair
 
-from mmdet.core import auto_fp16, force_fp32
+from mmcv.runner import auto_fp16, force_fp32
 from mmdet.models.builder import HEADS, build_loss
 
 from .....core import build_dim_coder

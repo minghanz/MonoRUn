@@ -2,7 +2,7 @@ import gc
 import io as sysio
 import numba
 import numpy as np
-
+import os
 
 @numba.jit
 def get_thresholds(scores: np.ndarray, num_gt, num_sample_pts=41):
@@ -61,6 +61,10 @@ def clean_data(gt_anno, dt_anno, current_class, difficulty):
             ignored_gt.append(1)
         else:
             ignored_gt.append(-1)
+        ### Minghan: ignored_gt == 0: objects that needs to be detected. 
+        ### 1: should ignore because of category ambiguity or too much truncation/occlusion/height. Do not count as FP or FN, but is relevant in matching gt and dt. 
+        ### -1: other classes of objects. 
+        ### ignored_dt below is similar. 
     # for i in range(num_gt):
         if gt_anno['name'][i] == 'DontCare':
             dc_bboxes.append(gt_anno['bbox'][i])
@@ -193,6 +197,8 @@ def compute_statistics_jit(overlaps,
     thresh_idx = 0
     delta = np.zeros((gt_size, ))
     delta_idx = 0
+    ### record the association
+    gtdet_idx = - np.ones((gt_size, ))
     for i in range(gt_size):
         if ignored_gt[i] == -1:
             continue
@@ -230,20 +236,26 @@ def compute_statistics_jit(overlaps,
 
         if (valid_detection == NO_DETECTION) and ignored_gt[i] == 0:
             fn += 1
+            gtdet_idx[i] = -3   ### not detected while should be detected
         elif ((valid_detection != NO_DETECTION)
               and (ignored_gt[i] == 1 or ignored_det[det_idx] == 1)):
             assigned_detection[det_idx] = True
+            gtdet_idx[i] = -4   ### detected but ignored
         elif valid_detection != NO_DETECTION:
             tp += 1
             # thresholds.append(dt_scores[det_idx])
             thresholds[thresh_idx] = dt_scores[det_idx]
             thresh_idx += 1
+            gtdet_idx[i] = det_idx      ### note that det_idx is sorted according to the confidence score in reversed order. 
             if compute_aos:
                 # delta.append(gt_alphas[i] - dt_alphas[det_idx])
                 delta[delta_idx] = gt_alphas[i] - dt_alphas[det_idx]
                 delta_idx += 1
 
             assigned_detection[det_idx] = True
+        else:
+            gtdet_idx[i] = -2       ### not detected and ignored_gt[i] == 1
+            ### gtdet_idx[i] = -1       ### ignored_gt[i] == -1
     if compute_fp:
         for i in range(det_size):
             if (not (assigned_detection[i] or ignored_det[i] == -1
@@ -276,7 +288,7 @@ def compute_statistics_jit(overlaps,
                 similarity = np.sum(tmp)
             else:
                 similarity = -1
-    return tp, fp, fn, similarity, thresholds[:thresh_idx]
+    return tp, fp, fn, similarity, thresholds[:thresh_idx], gtdet_idx
 
 
 def get_split_parts(num, num_part):
@@ -316,7 +328,7 @@ def fused_compute_statistics(overlaps,
             ignored_gt = ignored_gts[gt_num:gt_num + gt_nums[i]]
             ignored_det = ignored_dets[dt_num:dt_num + dt_nums[i]]
             dontcare = dontcares[dc_num:dc_num + dc_nums[i]]
-            tp, fp, fn, similarity, _ = compute_statistics_jit(
+            tp, fp, fn, similarity, _, gtdet_idx = compute_statistics_jit(
                 overlap,
                 gt_data,
                 dt_data,
@@ -486,6 +498,16 @@ def eval_class(gt_annos,
     recall = np.zeros(
         [num_class, num_difficulty, num_minoverlap, N_SAMPLE_PTS])
     aos = np.zeros([num_class, num_difficulty, num_minoverlap, N_SAMPLE_PTS])
+
+    if metric == 0:
+        gtdet_idxs = [None]*num_class
+        for ii in range(num_class):
+            gtdet_idxs[ii] = [None]*num_difficulty
+            for iii in range(num_difficulty):
+                gtdet_idxs[ii][iii] = [None]*num_minoverlap
+                for iiii in range(num_minoverlap):
+                    gtdet_idxs[ii][iii][iiii] = [None]*num_examples
+
     for m, current_class in enumerate(current_classes):
         for idx_l, difficulty in enumerate(difficultys):
             rets = _prepare_data(gt_annos, dt_annos, current_class, difficulty)
@@ -494,6 +516,9 @@ def eval_class(gt_annos,
             for k, min_overlap in enumerate(min_overlaps[:, metric, m]):
                 thresholdss = []
                 for i in range(len(gt_annos)):
+                    # if i == 5 and m == 0 and idx_l == 2 and k == 1:
+                    #     print("gt_datas_list[i]", gt_datas_list[i])
+                    #     print("dt_datas_list[i]", dt_datas_list[i])
                     rets = compute_statistics_jit(
                         overlaps[i],
                         gt_datas_list[i],
@@ -505,8 +530,13 @@ def eval_class(gt_annos,
                         min_overlap=min_overlap,
                         thresh=0.0,
                         compute_fp=False)
-                    tp, fp, fn, similarity, thresholds = rets
+                    tp, fp, fn, similarity, thresholds, gtdet_idx = rets
                     thresholdss += thresholds.tolist()
+                    # if i == 5 and m == 0 and idx_l == 2 and k == 1:
+                    #     print("gtdet_idx", gtdet_idx)
+                    if metric == 0:
+                        gtdet_idxs[m][idx_l][k][i] = gtdet_idx
+
                 thresholdss = np.array(thresholdss)
                 thresholds = get_thresholds(thresholdss, total_num_valid_gt)
                 thresholds = np.array(thresholds)
@@ -558,6 +588,8 @@ def eval_class(gt_annos,
         'precision': precision,
         'orientation': aos,
     }
+    if metric == 0:
+        ret_dict['gtdet_idxs'] = gtdet_idxs
 
     # clean temp variables
     del overlaps
@@ -594,7 +626,8 @@ def do_eval(gt_annos,
             current_classes,
             min_overlaps,
             eval_types=['bbox', 'bev', '3d'],
-            criteria='R11'):
+            criteria='R11', 
+            fnum_list=None):
     # min_overlaps: [num_minoverlap, metric, num_class]
     difficultys = [0, 1, 2]
     ret = eval_class(
@@ -610,6 +643,42 @@ def do_eval(gt_annos,
     mAP_aos = None
     if 'aos' in eval_types:
         mAP_aos = get_mAP(ret['orientation'], criteria=criteria)
+
+    if False:
+    # if 'gtdet_idxs' in ret:
+        # [num_class, num_difficulty, num_minoverlap, num_examples]
+        out_root = '/home/minghan.zhu/repos/MonoFlex/output_local3d/toy_experiments/inference/kitti_train/data/gt2pred_gt_pred_ego'
+        print("Saving gt2pred correspondences to: ", out_root)
+        if not os.path.exists(out_root):
+            os.makedirs(out_root)
+        gtdet_idxs = ret['gtdet_idxs']
+        num_difficulty = len(gtdet_idxs[0])
+        num_minoverlap = len(gtdet_idxs[0][0])
+        num_examples = len(gtdet_idxs[0][0][0])
+        for idx, iiii in enumerate(range(num_examples)):
+            fnum = fnum_list[idx]
+            out_path = os.path.join(out_root, "%06d.txt"%fnum)
+            gtdet_idx_all = - np.ones_like(gtdet_idxs[0][0][0][iiii])
+            for ii in range(num_difficulty):
+                for iii in range(num_minoverlap):
+                    gtdet_idx = gtdet_idxs[0][ii][iii][iiii]
+                    for iitem in range(gtdet_idx.shape[0]):
+                        if gtdet_idx_all[iitem] < 0:
+                            if gtdet_idx[iitem] < gtdet_idx_all[iitem]: 
+                                gtdet_idx_all[iitem] = gtdet_idx[iitem]
+                            elif gtdet_idx[iitem] >= 0:
+                                gtdet_idx_all[iitem] = gtdet_idx[iitem]
+                        else:
+                            if gtdet_idx[iitem] >= 0:
+                                gtdet_idx_all[iitem] = gtdet_idx[iitem]
+                        # if gtdet_idx[iitem] >= 0 and gtdet_idx_all[iitem] == -1:
+                        #     gtdet_idx_all[iitem] = gtdet_idx[iitem]
+                    # if iiii == 0:
+                    #     for i0 in range(len(gtdet_idxs)):
+                    #         print("gtdet_idxs[{}][{}][{}][{}]".format(i0, ii, iii, iiii), gtdet_idxs[i0][ii][iii][iiii])
+            with open(out_path, 'w') as f:
+                text = ' '.join(["%d"%x for x in gtdet_idx_all])
+                f.write(text)
 
     mAP_bev = None
     if 'bev' in eval_types:
@@ -648,7 +717,8 @@ def kitti_eval(gt_annos,
                dt_annos,
                current_classes,
                eval_types=['bbox', 'bev', '3d'],
-               criteria='R11'):
+               criteria='R11', 
+               fnum_list=None):
     """KITTI evaluation.
 
     Args:
@@ -699,7 +769,7 @@ def kitti_eval(gt_annos,
 
     mAPbbox, mAPbev, mAP3d, mAPaos = do_eval(gt_annos, dt_annos,
                                              current_classes, min_overlaps,
-                                             eval_types, criteria=criteria)
+                                             eval_types, criteria=criteria, fnum_list=fnum_list)
 
     ret_dict = {}
     difficulty = ['easy', 'moderate', 'hard']

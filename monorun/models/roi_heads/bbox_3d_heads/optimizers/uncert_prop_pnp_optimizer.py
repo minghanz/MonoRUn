@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-from mmdet.core import auto_fp16, force_fp32
+from mmcv.runner import auto_fp16, force_fp32
 from mmdet.models.builder import HEADS, build_loss
 from .....core import build_rotation_coder, bbox3d_overlaps_aligned_torch
 from .....ops import build_pnp

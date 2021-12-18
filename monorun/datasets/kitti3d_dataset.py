@@ -89,6 +89,24 @@ class KITTI3DDataset(CustomDataset):
             calib = self.open_calib_file(
                 self.calib_prefix + filename_raw + '.txt', self.calib_cam)
             self.calibs.append(calib)
+
+        ### load file recording 2face and 1face objects
+        # f_face2 = "/home/minghan.zhu/repos/local3d/preprocessing/splits_3712/Car_monoflex_val.txt"
+        # f_face2 = "/home/minghan.zhu/repos/local3d/preprocessing/splits_3712/Car_monoflex_2face_val.txt"
+        f_face2 = "/home/minghan.zhu/repos/local3d/preprocessing/splits_3712/Car_all_2face_val.txt"
+        f_face1 = "/home/minghan.zhu/repos/local3d/preprocessing/splits_3712/Car_all_1face_val.txt"
+        with open(f_face2) as f:
+            lines = f.read().splitlines()
+            img_name_idxs = [line.split('/')[1].split('.')[0] for line in lines]
+            self.img_obj_idxs_face2 = set([tuple([int(x) for x in line.split('_')]) for line in img_name_idxs])
+
+        with open(f_face1) as f:
+            lines = f.read().splitlines()
+            img_name_idxs = [line.split('/')[1].split('.')[0] for line in lines]
+            self.img_obj_idxs_face1 = set([tuple([int(x) for x in line.split('_')]) for line in img_name_idxs])
+
+        self.img_idxs = [int(x) for x in filenames]
+
         return data_infos
 
     def get_ann_info(self, idx):
@@ -139,6 +157,7 @@ class KITTI3DDataset(CustomDataset):
 
         label = self.labels[idx]
 
+        actual_pairs = []
         for object_id, instance in enumerate(label):
             instance_class = instance[0]
             truncation = instance[1]
@@ -147,7 +166,15 @@ class KITTI3DDataset(CustomDataset):
             bbox = instance[4:8]  # x1, y1, x2, y2
             bbox_3d = instance[8:]  # h, w, l, x, y, z, yaw
 
+            ### decide whether an object should be included in evaluation
+            img_idx = self.img_idxs[idx]
+            obj_idx = object_id
+            obj_is_face2 = tuple([img_idx, obj_idx]) in self.img_obj_idxs_face2
+
+            # if instance_class in self.CLASSES and obj_is_face2:
             if instance_class in self.CLASSES:
+                actual_pairs.append(tuple([img_idx, obj_idx]))
+
                 object_ids.append(object_id)
 
                 gt_labels.append(self.CLASSES.index(instance_class))  # zero-based
@@ -174,6 +201,11 @@ class KITTI3DDataset(CustomDataset):
 
             elif instance_class.lower() == 'dontcare':
                 gt_bboxes_ignore.append(bbox)
+
+        # with open("/home/minghan.zhu/repos/MonoRUn/img_line_pairs.txt", "a") as f:
+        #     for item in actual_pairs:
+        #         img_id, line_id = item
+        #         f.write("Car/%06d_%02d.png\n"%(img_id, line_id))
 
         if gt_bboxes:
             gt_bboxes = np.array(gt_bboxes, dtype=np.float32)
@@ -230,7 +262,7 @@ class KITTI3DDataset(CustomDataset):
         results = self.format_results(results, gt_ann_infos)
         if result_dir is not None:
             if not osp.exists(result_dir):
-                os.mkdir(result_dir)
+                os.makedirs(result_dir)
             self.write_result_files(results, osp.join(result_dir, 'data'))
         if self.label_prefix is None:  # test mode
             return dict()
@@ -241,7 +273,8 @@ class KITTI3DDataset(CustomDataset):
             results,
             self.CLASSES,
             eval_types=metric,
-            criteria=criteria)
+            criteria=criteria, 
+            fnum_list=self.img_idxs)
         if print_summary:
             print('\n' + ap_result_str)
         if summary_file is not None:

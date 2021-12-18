@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from mmdet.core import auto_fp16
+from mmcv.runner import auto_fp16
 from mmdet.models.builder import HEADS
 from .fc_extractor import FCExtractor
 

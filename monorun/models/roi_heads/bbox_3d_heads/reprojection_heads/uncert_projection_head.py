@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from mmdet.core import auto_fp16, force_fp32
+from mmcv.runner import auto_fp16, force_fp32
 from mmdet.models.builder import HEADS, build_loss
 
 from .....core import build_proj_error_coder

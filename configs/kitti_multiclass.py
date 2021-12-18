@@ -209,8 +209,8 @@ test_cfg = dict(
         calib_scoring=True,
         cov_correction=True))
 dataset_type = 'KITTI3DDataset'
-train_data_root = 'data/kitti/training/'
-test_data_root = 'data/kitti/testing/'
+train_data_root = '/home/minghan.zhu/datasets/extracted/kitti_object/training/'
+test_data_root = '/home/minghan.zhu/datasets/extracted/kitti_object/testing/'
 img_norm_cfg = dict(
     mean=[95.80, 98.72, 93.82], std=[83.11, 81.65, 80.54], to_rgb=True)
 train_pipeline = [
@@ -251,8 +251,8 @@ test_pipeline = [
         ])
 ]
 data = dict(
-    samples_per_gpu=3,
-    workers_per_gpu=3,
+    samples_per_gpu=6,
+    workers_per_gpu=6,
     train=dict(
         type=dataset_type,
         ann_file=train_data_root + 'mono3dsplit_train_list.txt',

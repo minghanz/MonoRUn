@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../datasets/extracted/kitti_object"
+		}
+	],
+	"settings": {}
+}

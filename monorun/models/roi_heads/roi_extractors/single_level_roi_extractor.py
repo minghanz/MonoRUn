@@ -1,4 +1,4 @@
-from mmdet.core import force_fp32
+from mmcv.runner import force_fp32
 from mmdet.models import ROI_EXTRACTORS, SingleRoIExtractor
 
 

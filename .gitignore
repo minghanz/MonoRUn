@@ -5,3 +5,7 @@
 /data/
 /monorun/ops/least_squares/_ext.c
 /checkpoints/
+
+*.pyc
+*.png
+*.so

@@ -6,7 +6,8 @@ from mmcv.ops import Conv2d
 from mmcv.ops.carafe import CARAFEPack
 from torch.nn.modules.utils import _pair
 
-from mmdet.core import auto_fp16, force_fp32, multi_apply
+from mmcv.runner import auto_fp16, force_fp32
+from mmdet.core import multi_apply
 from mmdet.models.builder import HEADS, build_loss
 
 from .....core import build_coord_coder, masked_dense_target

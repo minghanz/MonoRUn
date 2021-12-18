@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _NormBase
 
-from mmdet.core import auto_fp16
+from mmcv.runner import auto_fp16
 from mmdet.models.builder import HEADS, build_loss
 
 from .....core import build_iou3d_sampler
